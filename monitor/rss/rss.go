@@ -1,5 +1,5 @@
-// Package github -
-package github
+// Package rss -
+package rss
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"reflect"
 
 	"github.com/mmcdole/gofeed"
-	store "github.com/shanehowearth/gopls-announce-bot/monitor/github/repository"
+	store "github.com/shanehowearth/gopls-announce-bot/monitor/rss/repository"
 )
 
 // watched structure for handle parsing of RSS/Atom feeds
@@ -32,7 +32,7 @@ func isNilFixed(i store.Storage) bool {
 	return false
 }
 
-// NewWatched - create a new RSS instance
+// NewWatched - create a new watched instance
 //nolint:golint
 func NewWatched(store store.Storage, urls ...string) (*watched, error) {
 	if isNilFixed(store) {
