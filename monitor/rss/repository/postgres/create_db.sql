@@ -1,5 +1,5 @@
 CREATE TABLE releases(
-    title TEXT;
-    content TEXT;
-    link TEXT;
+    title TEXT,
+    content TEXT,
+    link TEXT
 );
