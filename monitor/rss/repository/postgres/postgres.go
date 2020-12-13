@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"database/sql"
+	"errors"
 
 	_ "github.com/lib/pq" //nolint:golint
 )
@@ -34,7 +35,7 @@ func NewPGStore(connStr string) (*pg, error) {
 func (pg *pg) CheckExists(title string) (bool, error) {
 	var tmpTitle sql.NullString
 	err := pg.dbConn.QueryRow("select title from releases where title = $1", title).Scan(&tmpTitle)
-	if err != nil && !err.Is(sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("unable to query releases with error %w", err)
 	}
 	return tmpTitle.Valid, nil
