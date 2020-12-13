@@ -1,104 +1,97 @@
+// Package github -
+package github
+
 import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"reflect"
 
-	"github.com/gilliek/go-opml/opml"
 	"github.com/mmcdole/gofeed"
+	store "github.com/shanehowearth/gopls-announce-bot/monitor/github/repository"
 )
 
-// RSS structure for handle parsing of RSS/Atom feeds
-type RSS struct {
-	feeds []struct {
-		displayName string
-		feed        *gofeed.Feed
+// watched structure for handle parsing of RSS/Atom feeds
+type watched struct {
+	Feeds []struct {
+		URL  string
+		Feed *gofeed.Feed
 	}
-	c *Controller
+	Store store.Storage
 }
 
-// Init reads an feed related configuration
-func (r *RSS) Init(c *Controller) {
-	r.c = c
-
-	// Check if we have any OMPL file to load
-	if r.c.conf.OPMLFile != "" {
-		doc, err := opml.NewOPMLFromFile(r.c.conf.OPMLFile)
-		if err != nil {
-			log.Printf("Failed to load OPML file, %v", err)
-			return
-		}
-
-		// Add URLs to the list of feeds
-		for _, b := range doc.Body.Outlines {
-			if b.Outlines != nil {
-				for _, o := range b.Outlines {
-					url := r.GetURLFromOPML(o)
-					if url != "" {
-						r.c.conf.Feeds = append(r.c.conf.Feeds, Feed{URL: url})
-					}
-				}
-			} else {
-				url := r.GetURLFromOPML(b)
-				if url != "" {
-					r.c.conf.Feeds = append(r.c.conf.Feeds, Feed{URL: url})
-				}
-			}
-		}
+// check that the concrete instance passed in as a store.Storage is not nil
+func isNilFixed(i store.Storage) bool {
+	if i == nil {
+		return true
 	}
+	switch reflect.TypeOf(i).Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Array, reflect.Chan, reflect.Slice:
+		return reflect.ValueOf(i).IsNil()
+	}
+	return false
 }
 
-// GetURLFromOPML retrieves any URL from the OPML object
-func (r *RSS) GetURLFromOPML(b opml.Outline) string {
-	str := ""
-	if b.XMLURL != "" {
-		str = b.XMLURL
-	} else if b.HTMLURL != "" {
-		str = b.HTMLURL
-	} else if b.URL != "" {
-		str = b.URL
+// NewWatched - create a new RSS instance
+//nolint:golint
+func NewWatched(store store.Storage, urls ...string) (*watched, error) {
+	if isNilFixed(store) {
+		return nil, fmt.Errorf("no store supplied cannot continue")
 	}
-	return str
+	if len(urls) < 1 {
+		return nil, fmt.Errorf("no urls supplied cannot continue")
+	}
+	r := &watched{Store: store}
+	for _, u := range urls {
+		r.Feeds = append(r.Feeds, struct {
+			URL  string
+			Feed *gofeed.Feed
+		}{URL: u})
+	}
+	return r, nil
 }
 
-// Update fetches all articles for all feeds
-func (r *RSS) Update() {
-	fp := gofeed.NewParser()
-	r.feeds = []struct {
-		displayName string
-		feed        *gofeed.Feed
-	}{}
-
-	var mu sync.Mutex
-
-	var wg sync.WaitGroup
-
-	for _, f := range r.c.conf.Feeds {
-		wg.Add(1)
-		go func(f Feed) {
-			feed, err := r.FetchURL(fp, f.URL)
+// GetUnseen - get previously unseen releases
+func (r *watched) GetUnseen() ([][]string, error) {
+	r.update()
+	unseen := [][]string{}
+	for i := range r.Feeds {
+		for j := range r.Feeds[i].Feed.Items {
+			title := r.Feeds[i].Feed.Items[j].Title
+			seen, err := r.Store.CheckExists(title)
 			if err != nil {
-				log.Printf("error fetching url: %s, err: %v", f.URL, err)
-			} else {
-				mu.Lock()
-				r.feeds = append(r.feeds, struct {
-					displayName string
-					feed        *gofeed.Feed
-				}{
-					f.Name,
-					feed,
-				})
-				mu.Unlock()
+				log.Printf("unable to check %q with error %v", title, err)
+				return [][]string{}, fmt.Errorf("unable to check store with error %w", err)
 			}
-			wg.Done()
-		}(f)
+			if !seen {
+				content := r.Feeds[i].Feed.Items[j].Content
+				link := r.Feeds[i].Feed.Items[j].Link
+				if err := r.Store.CreateItem(title, content, link); err != nil {
+					log.Printf("unable to create %q with error %v", title, err)
+					return [][]string{}, fmt.Errorf("unable to create item with error %w", err)
+				}
+				unseen = append(unseen, []string{title, content, link})
+			}
+		}
 	}
-	wg.Wait()
+	return unseen, nil
+}
+
+// Update - fetch all items for all feeds
+func (r *watched) update() {
+	fp := gofeed.NewParser()
+	for idx := range r.Feeds {
+		feed, err := r.fetchURL(fp, r.Feeds[idx].URL)
+		if err != nil {
+			log.Printf("error fetching url: %s, err: %v", r.Feeds[idx].URL, err)
+		}
+		r.Feeds[idx].Feed = feed
+	}
 }
 
 // FetchURL fetches the feed URL and also fakes the user-agent to be able
 // to retrieve data from sites like reddit.
-func (r *RSS) FetchURL(fp *gofeed.Parser, url string) (feed *gofeed.Feed, err error) {
+func (r *watched) fetchURL(fp *gofeed.Parser, url string) (feed *gofeed.Feed, err error) {
 	client := &http.Client{}
 
 	req, err := http.NewRequest("GET", url, nil)
