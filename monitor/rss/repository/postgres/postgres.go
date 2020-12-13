@@ -44,10 +44,10 @@ func (pg *pg) CheckExists(title string) (bool, error) {
 
 // CreateItem - create a new release item in the database
 func (pg *pg) CreateItem(title, content, link string) error {
+	var id sql.NullInt64
 	sqlStatement := `
 	INSERT INTO releases (title, content, link)
 	VALUES ($1, $2, $3)
 	RETURNING id`
-	id := 0
 	return pg.dbConn.QueryRow(sqlStatement, title, content, link).Scan(&id)
 }
