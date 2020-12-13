@@ -2,14 +2,15 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/shanehowearth/go-pls-announce-bot/publish"
-	"github.com/shanehowearth/go-pls-announce-bot/publish/twitter"
-	"github.com/shanehowearth/go-pls-announce-bot/storage"
+	"github.com/shanehowearth/gopls-announce-bot/monitor/rss"
+	postgresstore "github.com/shanehowearth/gopls-announce-bot/monitor/rss/repository/postgres"
+	publish "github.com/shanehowearth/gopls-announce-bot/platform"
+	"github.com/shanehowearth/gopls-announce-bot/platform/twitter"
 )
 
 func main() {
@@ -24,10 +25,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to create twitter client with error %v", err)
 	}
-	platforms := []publish.Publisher{}
-	platforms = append(platforms, tc)
+	platforms := map[string]publish.Platform{}
+	platforms["twitter"] = tc
 
-	// Connect to the data store
+	//TODO Create clients for other platforms (eg. Usenet, Slack, Direct Mail lists)
+
+	// Connect to the github specific data store
 	pgDB := os.Getenv("POSTGRES_DATABASE")
 	db, err := postgresstore.NewPGStore(pgDB)
 	if err != nil {
@@ -35,22 +38,33 @@ func main() {
 	}
 
 	// Retrieve content
-	set := flag.String("type", "", "the name of the content set to produce")
-	flag.Parse()
-	data, translation, explanation, err := storage.GetContent(*set, db)
+	releaseURL := os.Getenv("RELEASE_URL")
+	w, err := rss.NewWatched(db, releaseURL)
 	if err != nil {
-		log.Fatalf("Unable to retrieve content with error %v", err)
+		log.Fatalf("Unable to create new watched instance with error %v", err)
 	}
 
-	content := strings.Join([]string{data, translation, explanation}, "\n\n")
-	// Publish content
-	for idx := range platforms {
-		err := platforms[idx].PublishContent(content)
+	for {
+		releases, err := w.GetReleases()
 		if err != nil {
-			// not the end of the world so don't die, but someone somewhere
-			// should have a look at it
-			log.Printf("ERROR: Getting content for %v returned error %v", platforms[idx], err)
+			log.Printf("WARNING GetReleases() returned error %v", err)
 		}
-	}
+		for idx := range releases {
+			for k := range platforms {
+				var releaseInf string
+				if k == "twitter" {
+					// Drop the content
+					releaseInf = strings.Join([]string{releases[idx][0], " is now available.", "\n\n", "Further information can be found at: ", releases[idx][2]}, "")
+				} else {
 
+					releaseInf = strings.Join(releases[idx], "\n\n")
+				}
+				if err := platforms[k].PublishContent(releaseInf); err != nil {
+					log.Printf("WARNING PublishContent() returned error %v for %s", err, releaseInf)
+				}
+			}
+		}
+		// Sleep and check again in 30 seconds
+		time.Sleep(time.Second * 30)
+	}
 }
