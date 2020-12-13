@@ -9,12 +9,14 @@ local database (currently Postgres). Therefore the configuration information
 described below is for that set-up.
 
 #Configuration
+```bash
 export TWITTER_API_KEY="REDACTED"
 export TWITTER_API_SECRET="REDACTED"
 export TWITTER_ACCESS_TOKEN="REDACTED-REDACTED"
 export TWITTER_ACCESS_TOKEN_SECRET="REDACTED"
 export POSTGRES_DATABASE="user=bot dbname=REDACTED sslmode=disable password=REDACTED"
 export RELEASE_URL="https://github.com/golang/tools/releases.atom"
+```
 
 #TODO
 Create drivers that will allow the bot to publish to other platforms, such as
